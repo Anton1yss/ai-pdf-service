@@ -39,6 +39,9 @@ dependencies {
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 	implementation 'org.springframework.boot:spring-boot-starter-log4j2'
+	implementation("org.apache.pdfbox:pdfbox:3.0.5")
+	implementation 'org.springframework:spring-test'
+	implementation ("software.amazon.awssdk:s3:2.42.18")
 }
 
 tasks.named('test') {
