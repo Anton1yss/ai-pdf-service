@@ -27,12 +27,12 @@ public class AuditLog {
     private User user;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "document_id")
-    private PDFDocument pdfDocument;
+    @JoinColumn(name = "file_id")
+    private PDFFile pdfFile;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "redaction_job_id")
-    private RedactionJob redactionJob;
+    @JoinColumn(name = "processing_job_id")
+    private ProcessingJob processingJob;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "action")

@@ -15,10 +15,10 @@ import java.util.List;
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor
-@ToString(exclude = "redactionJobsList")
-@EqualsAndHashCode(exclude = "redactionJobsList")
-@Table(name = "pdf_documents")
-public class PDFDocument {
+@ToString(exclude = "processingJobsList")
+@EqualsAndHashCode(exclude = "processingJobsList")
+@Table(name = "pdf_files")
+public class PDFFile {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -27,10 +27,6 @@ public class PDFDocument {
     @Size(min = 2, max = 128)
     @Column(name = "name", nullable = false)
     private String name;
-
-    @Size(max = 256)
-    @Column(name = "description")
-    private String description;
 
     @Size(min = 2, max = 512)
     @Column(name = "s3_key", nullable = false)
@@ -55,6 +51,13 @@ public class PDFDocument {
     @JoinColumn(name = "user_id")
     private User user;
 
-    @OneToMany(cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY, mappedBy = "pdfDocument")
-    private List<RedactionJob> redactionJobsList = new ArrayList<>();
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "parent_file_id")
+    private PDFFile parentFile;
+
+    @OneToMany(cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY, mappedBy = "pdfFile")
+    private List<ProcessingJob> processingJobsList = new ArrayList<>();
+
+    @OneToMany(cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY, mappedBy = "pdfFile")
+    private List<AuditLog> auditLogList = new ArrayList<>();
 }

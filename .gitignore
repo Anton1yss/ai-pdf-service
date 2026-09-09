@@ -38,3 +38,6 @@ out/
 
 ### .env File ###
 .env
+
+### Local Assets ###
+./assets/*

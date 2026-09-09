@@ -1,5 +1,5 @@
 package by.AntonDemchuk.ai_pdf_service.entity;
 
-public enum RedactionJobStatus {
+public enum ProcessingJobStatus {
     SUCCESS, PENDING, FAILED;
 }
