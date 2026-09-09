@@ -3,7 +3,6 @@ package by.AntonDemchuk.ai_pdf_service.entity;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.Size;
 import lombok.*;
-import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.ZonedDateTime;
 
@@ -12,8 +11,8 @@ import java.time.ZonedDateTime;
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor
-@Table(name = "redaction_jobs")
-public class RedactionJob {
+@Table(name = "processing_jobs")
+public class ProcessingJob {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -24,8 +23,8 @@ public class RedactionJob {
     private User user;
 
     @ManyToOne(fetch =  FetchType.LAZY)
-    @JoinColumn(name = "document_id")
-    private PDFDocument pdfDocument;
+    @JoinColumn(name = "file_id")
+    private PDFFile pdfFile;
 
     @Column(name = "prompt", nullable = false)
     private String prompt;
@@ -39,10 +38,9 @@ public class RedactionJob {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status")
-    private RedactionJobStatus status;
+    private ProcessingJobStatus status;
 
     @Column(name = "created_at")
-    @CreationTimestamp
     private ZonedDateTime createdAt;
 
     @Column(name = "completed_at")

@@ -1,5 +1,19 @@
 package by.AntonDemchuk.ai_pdf_service.entity;
 
 public enum AuditLogAction {
-    CREATE, DELETE, UPDATE, HIDE;
+    USER_LOGIN,
+    USER_LOGOUT,
+    USER_REGISTER,
+    USER_UPDATE,
+    USER_DELETE,
+
+    FILE_SAVE,
+    FILE_DELETE,
+    FILE_UPLOAD,
+    FILE_DOWNLOAD,
+    FILE_REDACTED,
+
+    PROCESSING_JOB_CREATE,
+    PROCESSING_JOB_DELETE,
+    PROCESSING_JOB_UPDATE,
 }
