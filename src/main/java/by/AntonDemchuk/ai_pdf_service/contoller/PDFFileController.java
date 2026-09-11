@@ -1,10 +1,7 @@
 package by.AntonDemchuk.ai_pdf_service.contoller;
 
 import by.AntonDemchuk.ai_pdf_service.dto.PageDTO;
-import by.AntonDemchuk.ai_pdf_service.dto.pdfFile.PDFFIleDTO;
-import by.AntonDemchuk.ai_pdf_service.dto.pdfFile.PDFFileDetailedReadDTO;
-import by.AntonDemchuk.ai_pdf_service.dto.pdfFile.PDFFileReadDTO;
-import by.AntonDemchuk.ai_pdf_service.dto.processingJob.ProcessingJobDTO;
+import by.AntonDemchuk.ai_pdf_service.dto.pdfFile.*;
 import by.AntonDemchuk.ai_pdf_service.service.PDFFileService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -58,8 +55,15 @@ public class PDFFileController {
     @RequestMapping(value="/{fileId}/redact", method=RequestMethod.PUT)
     @ResponseStatus(value = HttpStatus.OK)
     @Operation(summary = "Redact sensitive information", description = "Analyzes the PDF file and hides sensitive information specified by the processing job.")
-    public void hideFileInformation(@PathVariable Long fileId, @RequestBody ProcessingJobDTO processingJobDTO) {
-        pdfFileService.redactContent(fileId, processingJobDTO);
+    public void redact(@PathVariable Long fileId, @RequestBody PDFFileRedactDTO PDFFileRedactDTO) {
+        pdfFileService.redactContent(fileId, PDFFileRedactDTO);
+    }
+
+    @RequestMapping(value="/{fileId}/encrypt", method=RequestMethod.PUT)
+    @ResponseStatus(value = HttpStatus.OK)
+    @Operation(summary = "Encrypt file", description = "Sets permission")
+    public void encrypt(@PathVariable Long fileId, @RequestBody PDFEncryptionSettingsDTO encryptionSettingsDTO) {
+        pdfFileService.encrypt(fileId, encryptionSettingsDTO);
     }
 
 }

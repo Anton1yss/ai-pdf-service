@@ -4,7 +4,9 @@ import jakarta.persistence.*;
 import jakarta.validation.constraints.Size;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.UpdateTimestamp;
+import org.hibernate.type.SqlTypes;
 
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
@@ -54,6 +56,10 @@ public class PDFFile {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "parent_file_id")
     private PDFFile parentFile;
+
+    @Column(name = "encryption_settings", columnDefinition = "jsonb")
+    @JdbcTypeCode(SqlTypes.JSON)
+    private PDFEncryptionSettings encryptionSettings;
 
     @OneToMany(cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY, mappedBy = "pdfFile")
     private List<ProcessingJob> processingJobsList = new ArrayList<>();

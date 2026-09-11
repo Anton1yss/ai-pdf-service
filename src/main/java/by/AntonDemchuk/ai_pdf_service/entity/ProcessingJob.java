@@ -26,8 +26,9 @@ public class ProcessingJob {
     @JoinColumn(name = "file_id")
     private PDFFile pdfFile;
 
-    @Column(name = "prompt", nullable = false)
-    private String prompt;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "action")
+    private ProcessingJobAction action;
 
     @Column(name = "response_message")
     private String responseMessage;

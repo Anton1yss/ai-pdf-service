@@ -1,12 +1,8 @@
 package by.AntonDemchuk.ai_pdf_service.service;
 
 import by.AntonDemchuk.ai_pdf_service.dto.PageDTO;
-import by.AntonDemchuk.ai_pdf_service.dto.processingJob.ProcessingJobDTO;
 import by.AntonDemchuk.ai_pdf_service.dto.processingJob.ProcessingJobReadDTO;
-import by.AntonDemchuk.ai_pdf_service.entity.PDFFile;
-import by.AntonDemchuk.ai_pdf_service.entity.ProcessingJob;
-import by.AntonDemchuk.ai_pdf_service.entity.ProcessingJobStatus;
-import by.AntonDemchuk.ai_pdf_service.entity.User;
+import by.AntonDemchuk.ai_pdf_service.entity.*;
 import by.AntonDemchuk.ai_pdf_service.mapper.processingJob.ProcessingJobMapper;
 import by.AntonDemchuk.ai_pdf_service.mapper.processingJob.ProcessingJobReadMapper;
 import by.AntonDemchuk.ai_pdf_service.repository.PDFFileRepository;
@@ -37,12 +33,12 @@ public class ProcessingJobService {
 
     private final SharedService sharedService;
 
-    public ProcessingJob create(ProcessingJobDTO processingJobDto, User user, PDFFile pdfFile, ZonedDateTime createdAt) {
+    public ProcessingJob create(ProcessingJobAction action, User user, PDFFile pdfFile, ZonedDateTime createdAt) {
 
         ProcessingJob processingJobToCreate = processingJobRepository.save(ProcessingJob.builder()
                 .pdfFile(pdfFile)
                 .user(user)
-                .prompt(processingJobDto.getPrompt())
+                .action(action)
                 .status(ProcessingJobStatus.PENDING)
                 .createdAt(createdAt)
                 .build());
