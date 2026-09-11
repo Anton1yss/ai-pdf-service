@@ -1,21 +1,21 @@
 package by.AntonDemchuk.ai_pdf_service.service;
 
 import by.AntonDemchuk.ai_pdf_service.dto.PageDTO;
+import by.AntonDemchuk.ai_pdf_service.dto.pdfFile.PDFEncryptionSettingsDTO;
 import by.AntonDemchuk.ai_pdf_service.dto.pdfFile.PDFFIleDTO;
 import by.AntonDemchuk.ai_pdf_service.dto.pdfFile.PDFFileDetailedReadDTO;
 import by.AntonDemchuk.ai_pdf_service.dto.pdfFile.PDFFileReadDTO;
-import by.AntonDemchuk.ai_pdf_service.dto.processingJob.ProcessingJobDTO;
+import by.AntonDemchuk.ai_pdf_service.dto.pdfFile.PDFFileRedactDTO;
 
 import by.AntonDemchuk.ai_pdf_service.entity.*;
+import by.AntonDemchuk.ai_pdf_service.mapper.pdfFile.PDFFileEncryptionSettingsMapper;
 import by.AntonDemchuk.ai_pdf_service.mapper.pdfFile.PDFFileMapper;
 import by.AntonDemchuk.ai_pdf_service.mapper.pdfFile.PDFFileReadMapper;
 import by.AntonDemchuk.ai_pdf_service.mapper.user.UserReadMapper;
 import by.AntonDemchuk.ai_pdf_service.repository.PDFFileRepository;
 
 import com.itextpdf.kernel.colors.ColorConstants;
-import com.itextpdf.kernel.pdf.PdfDocument;
-import com.itextpdf.kernel.pdf.PdfReader;
-import com.itextpdf.kernel.pdf.PdfWriter;
+import com.itextpdf.kernel.pdf.*;
 import com.itextpdf.kernel.pdf.canvas.parser.PdfDocumentContentParser;
 import com.itextpdf.kernel.pdf.canvas.parser.PdfTextExtractor;
 import com.itextpdf.kernel.pdf.canvas.parser.listener.IPdfTextLocation;
@@ -58,6 +58,7 @@ public class PDFFileService {
     private final AuditLogService auditLogService;
 
     private final PDFFileMapper pdfDocumentMapper;
+    private final PDFFileEncryptionSettingsMapper pdfEncryptionSettingsMapper;
     private final PDFFileReadMapper pdfDocumentReadMapper;
     private final UserReadMapper userReadMapper;
 
@@ -75,6 +76,7 @@ public class PDFFileService {
                 .s3Key(key)
                 .version(1L)
                 .user(currentUser)
+                .encryptionSettings(new PDFEncryptionSettings())
                 .build());
 
         log.info("Document created successfully | user: {} | document: {}", currentUser.getUsername(), document.getName());
@@ -83,18 +85,18 @@ public class PDFFileService {
         return pdfDocumentMapper.toDto(fileToCreate);
     }
 
-    public PDFFileDetailedReadDTO redactContent(@NotNull Long fileId, ProcessingJobDTO processingJobDto) {
+    public PDFFileDetailedReadDTO redactContent(@NotNull Long fileId, PDFFileRedactDTO PDFFileRedactDto) {
 
         User currentUser = sharedService.getCurrentUser();
 
-        PDFFile pdfFile = pdfFileRepository.findById(fileId)
+        PDFFile pdfFile = pdfFileRepository.findByIdAndUserId(fileId, currentUser.getId())
                 .orElseThrow(() -> {
                     log.error("Document not found | user: {} | pdfFile: {}", currentUser.getUsername(), fileId);
                     return new EntityNotFoundException("Document not found | user: " + currentUser.getUsername());
                 });
 
         ProcessingJob processingJob = processingJobService.create(
-                processingJobDto,
+                ProcessingJobAction.FILE_REDACT,
                 currentUser,
                 pdfFile,
                 ZonedDateTime.now());
@@ -106,13 +108,13 @@ public class PDFFileService {
 
             String fileText = extractDocumentText(fileToRedact);
 
-            List<String> phrasesToRedact = aiService.getPhrasesToRedact(fileText, processingJobDto.getPrompt());
+            List<String> phrasesToRedact = aiService.getPhrasesToRedact(fileText, PDFFileRedactDto.getPrompt());
 
             String key = s3Service.uploadDocument(
                     redactPhrases(fileToRedact, phrasesToRedact),
                     pdfFile.getName(),
                     currentUser,
-                    "redacted");
+                    "processed");
 
             redactedFile = pdfFileRepository.save(PDFFile.builder()
                     .name(pdfFile.getName())
@@ -121,6 +123,7 @@ public class PDFFileService {
                     .parentFile(pdfFile)
                     .version(pdfFile.getVersion() + 1L)
                     .user(currentUser)
+                    .encryptionSettings(pdfFile.getEncryptionSettings())
                     .build());
 
             processingJobService.maskAsDone(processingJob, key, phrasesToRedact.toString());
@@ -134,8 +137,61 @@ public class PDFFileService {
             processingJobService.markAsFailed(processingJob, e.getMessage());
             log.error("Failed to redact pdfFile | user_id: {} | file_id: {} | error: {}",
                     currentUser.getId(), pdfFile.getId(), e.getMessage());
-            auditLogService.log(currentUser, redactedFile, processingJob, AuditLogAction.FILE_REDACTED, e.getMessage(), AuditLogStatus.FAILED);
+            auditLogService.log(currentUser, pdfFile, processingJob, AuditLogAction.FILE_REDACTED, e.getMessage(), AuditLogStatus.FAILED);
             throw new RuntimeException("Failed to redact pdfFile", e);
+        }
+    }
+
+    public PDFFileDetailedReadDTO encrypt(@NotNull Long fileId, PDFEncryptionSettingsDTO encryptionSettingsDTO) {
+
+        User currentUser = sharedService.getCurrentUser();
+
+        PDFFile pdfFile = pdfFileRepository.findByIdAndUserId(fileId, currentUser.getId())
+                .orElseThrow(() -> {
+                    log.error("Document not found | user: {} | pdfFile: {}", currentUser.getUsername(), fileId);
+                    return new EntityNotFoundException("Document not found | user: " + currentUser.getUsername());
+                });
+
+        PDFFile encryptedFile = null;
+
+        ProcessingJob processingJob = processingJobService.create(
+                ProcessingJobAction.FILE_ENCRYPTION,
+                currentUser,
+                pdfFile,
+                ZonedDateTime.now());
+
+        try {
+            byte[] fileToEncrypt = s3Service.downloadDocument(pdfFile.getS3Key());
+
+            String key = s3Service.uploadDocument(
+                    encryptFile(fileToEncrypt, encryptionSettingsDTO),
+                    pdfFile.getName(),
+                    currentUser,
+                    "processed");
+
+            encryptedFile = pdfFileRepository.save(PDFFile.builder()
+                    .name(pdfFile.getName())
+                    .originalS3Key(pdfFile.getOriginalS3Key())
+                    .s3Key(key)
+                    .parentFile(pdfFile)
+                    .version(pdfFile.getVersion() + 1L)
+                    .user(currentUser)
+                    .encryptionSettings(pdfEncryptionSettingsMapper.toEntity(encryptionSettingsDTO))
+                    .build());
+
+            processingJobService.maskAsDone(processingJob, key, encryptionSettingsDTO.toString());
+
+            log.info("Document encrypt successfully | user_id: {} | file_id: {}", currentUser.getId(), pdfFile.getId());
+            auditLogService.log(currentUser, encryptedFile, processingJob, AuditLogAction.FILE_REDACTED, "PDF File successfully encrypt", AuditLogStatus.COMPLETED);
+
+            return findPDFDocumentById(encryptedFile.getId());
+
+        } catch (Exception e) {
+            processingJobService.markAsFailed(processingJob, e.getMessage());
+            log.error("Failed to encrypt pdfFile | user_id: {} | file_id: {} | error: {}",
+                    currentUser.getId(), pdfFile.getId(), e.getMessage());
+            auditLogService.log(currentUser, pdfFile, processingJob, AuditLogAction.FILE_REDACTED, e.getMessage(), AuditLogStatus.FAILED);
+            throw new RuntimeException("Failed to encrypt pdfFile", e);
         }
     }
 
@@ -144,17 +200,18 @@ public class PDFFileService {
 
         User currentUser = sharedService.getCurrentUser();
 
-        PDFFile document = pdfFileRepository.findByIdAndUserId(fileId, currentUser.getId())
+        PDFFile pdfFile = pdfFileRepository.findByIdAndUserId(fileId, currentUser.getId())
                 .orElseThrow(() -> new EntityNotFoundException("Document with id " + fileId + " not found"));
 
         return PDFFileDetailedReadDTO.builder()
-                .id(document.getId())
-                .name(document.getName())
-                .preSignedURL(s3Service.generatePreSignedURL(document.getS3Key()))
-                .version(document.getVersion())
-                .createdAt(document.getCreatedAt())
-                .updatedAt(document.getUpdatedAt())
+                .id(pdfFile.getId())
+                .name(pdfFile.getName())
+                .preSignedURL(s3Service.generatePreSignedURL(pdfFile.getS3Key()))
+                .version(pdfFile.getVersion())
+                .createdAt(pdfFile.getCreatedAt())
+                .updatedAt(pdfFile.getUpdatedAt())
                 .user(userReadMapper.toDto(currentUser))
+                .encryptionSettings(pdfFile.getEncryptionSettings())
                 .build();
     }
 
@@ -267,6 +324,43 @@ public class PDFFileService {
             log.error("Failed to redact PDF", e);
             throw new RuntimeException("Failed to redact PDF", e);
         }
+    }
+
+    private byte[] encryptFile(byte[] fileBytes, PDFEncryptionSettingsDTO encryptionDTO){
+        try {
+            ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+
+            PdfReader reader = new PdfReader(new ByteArrayInputStream(fileBytes));
+            WriterProperties properties = new WriterProperties();
+
+            properties.setStandardEncryption(
+                    encryptionDTO.getUserPass().getBytes(),
+                    encryptionDTO.getOwnerPass().getBytes(),
+                    setEncryptPermissions(encryptionDTO),
+                        EncryptionConstants.ENCRYPTION_AES_256 | EncryptionConstants.DO_NOT_ENCRYPT_METADATA);
+            PdfWriter writer = new PdfWriter(outputStream, properties);
+
+            PdfDocument pdfDocument = new PdfDocument(reader, writer);
+
+            pdfDocument.close();
+
+            return outputStream.toByteArray();
+
+        } catch (IOException e) {
+            log.error("Failed to set permissions in PDF", e);
+            throw new RuntimeException("Failed to set permissions in PDF", e);
+        }
+    }
+
+    private int setEncryptPermissions(PDFEncryptionSettingsDTO encryptionDTO) throws IOException {
+
+        return (encryptionDTO.isAllowPrinting() ? EncryptionConstants.ALLOW_PRINTING | EncryptionConstants.ALLOW_DEGRADED_PRINTING : 0)
+                | (encryptionDTO.isAllowModifyContents() ? EncryptionConstants.ALLOW_MODIFY_CONTENTS : 0)
+                | (encryptionDTO.isAllowCopy() ? EncryptionConstants.ALLOW_COPY : 0)
+                | (encryptionDTO.isAllowModifyAnnotations() ? EncryptionConstants.ALLOW_MODIFY_ANNOTATIONS : 0)
+                | (encryptionDTO.isAllowFillIn() ? EncryptionConstants.ALLOW_FILL_IN : 0)
+                | (encryptionDTO.isAllowScreenReaders() ? EncryptionConstants.ALLOW_SCREENREADERS : 0)
+                | (encryptionDTO.isAllowAssembly() ? EncryptionConstants.ALLOW_ASSEMBLY : 0);
     }
 
     private void validateDocument(MultipartFile file) {

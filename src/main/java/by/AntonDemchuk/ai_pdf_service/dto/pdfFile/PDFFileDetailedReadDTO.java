@@ -1,11 +1,10 @@
 package by.AntonDemchuk.ai_pdf_service.dto.pdfFile;
 
-import by.AntonDemchuk.ai_pdf_service.dto.processingJob.ProcessingJobReadDTO;
 import by.AntonDemchuk.ai_pdf_service.dto.user.UserReadDTO;
+import by.AntonDemchuk.ai_pdf_service.entity.PDFEncryptionSettings;
 import lombok.*;
 
 import java.time.ZonedDateTime;
-import java.util.List;
 
 @Builder
 @Getter
@@ -20,5 +19,5 @@ public class PDFFileDetailedReadDTO {
     private Long version;
     private String preSignedURL;
     private UserReadDTO user;
-    private List<ProcessingJobReadDTO> processingJobReadDTOList;
+    private PDFEncryptionSettings encryptionSettings;
 }

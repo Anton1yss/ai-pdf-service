@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS processing_jobs(
     id BIGSERIAL PRIMARY KEY,
     user_id BIGINT REFERENCES users(id) ON DELETE CASCADE,
     file_id BIGINT REFERENCES pdf_files(id),
-    prompt TEXT NOT NULL,
+    action TEXT NOT NULL,
     response_message TEXT,
     result_s3_key VARCHAR(512),
     status VARCHAR(32) NOT NULL,
