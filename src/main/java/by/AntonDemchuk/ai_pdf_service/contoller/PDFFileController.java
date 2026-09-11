@@ -46,24 +46,26 @@ public class PDFFileController {
     }
 
     @RequestMapping(value="/{fileId}", method=RequestMethod.DELETE)
-    @ResponseStatus(value = HttpStatus.OK)
     @Operation(summary = "Delete a PDF file", description = "Deletes a PDF file identified by its ID.")
     public void deleteDocumentById(@PathVariable Long fileId) throws IOException {
         pdfFileService.deletePDFDocument(fileId);
     }
 
     @RequestMapping(value="/{fileId}/redact", method=RequestMethod.PUT)
-    @ResponseStatus(value = HttpStatus.OK)
     @Operation(summary = "Redact sensitive information", description = "Analyzes the PDF file and hides sensitive information specified by the processing job.")
-    public void redact(@PathVariable Long fileId, @RequestBody PDFFileRedactDTO PDFFileRedactDTO) {
-        pdfFileService.redactContent(fileId, PDFFileRedactDTO);
+    public ResponseEntity<PDFFileDetailedReadDTO> redact(@PathVariable Long fileId, @RequestBody PDFFileRedactDTO PDFFileRedactDTO) {
+        return ResponseEntity.ok(pdfFileService.redactContent(fileId, PDFFileRedactDTO));
     }
 
     @RequestMapping(value="/{fileId}/encrypt", method=RequestMethod.PUT)
-    @ResponseStatus(value = HttpStatus.OK)
     @Operation(summary = "Encrypt file", description = "Sets permission")
-    public void encrypt(@PathVariable Long fileId, @RequestBody PDFEncryptionSettingsDTO encryptionSettingsDTO) {
-        pdfFileService.encrypt(fileId, encryptionSettingsDTO);
+    public ResponseEntity<PDFFileDetailedReadDTO> encrypt(@PathVariable Long fileId, @RequestBody PDFEncryptionSettingsDTO encryptionSettingsDTO) {
+        return ResponseEntity.ok(pdfFileService.encrypt(fileId, encryptionSettingsDTO));
     }
 
+    @RequestMapping(value="/{fileId}/summarize", method=RequestMethod.PUT )
+    @Operation(summary = "Summarize text", description = "Summarize text from the file")
+    public ResponseEntity<PDFFileSummarizeResponseDTO> setSummarizeDTO(@PathVariable Long fileId, @RequestBody PDFFileSummarizeDTO summarizeDTO) {
+        return ResponseEntity.ok(pdfFileService.summarize(fileId, summarizeDTO));
+    }
 }

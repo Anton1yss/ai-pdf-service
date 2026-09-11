@@ -1,11 +1,7 @@
 package by.AntonDemchuk.ai_pdf_service.service;
 
 import by.AntonDemchuk.ai_pdf_service.dto.PageDTO;
-import by.AntonDemchuk.ai_pdf_service.dto.pdfFile.PDFEncryptionSettingsDTO;
-import by.AntonDemchuk.ai_pdf_service.dto.pdfFile.PDFFIleDTO;
-import by.AntonDemchuk.ai_pdf_service.dto.pdfFile.PDFFileDetailedReadDTO;
-import by.AntonDemchuk.ai_pdf_service.dto.pdfFile.PDFFileReadDTO;
-import by.AntonDemchuk.ai_pdf_service.dto.pdfFile.PDFFileRedactDTO;
+import by.AntonDemchuk.ai_pdf_service.dto.pdfFile.*;
 
 import by.AntonDemchuk.ai_pdf_service.entity.*;
 import by.AntonDemchuk.ai_pdf_service.mapper.pdfFile.PDFFileEncryptionSettingsMapper;
@@ -192,6 +188,45 @@ public class PDFFileService {
                     currentUser.getId(), pdfFile.getId(), e.getMessage());
             auditLogService.log(currentUser, pdfFile, processingJob, AuditLogAction.FILE_REDACTED, e.getMessage(), AuditLogStatus.FAILED);
             throw new RuntimeException("Failed to encrypt pdfFile", e);
+        }
+    }
+
+    public PDFFileSummarizeResponseDTO summarize(@NotNull Long fileId, PDFFileSummarizeDTO summarizeDTO) {
+
+        User currentUser = sharedService.getCurrentUser();
+
+        PDFFile pdfFile = pdfFileRepository.findByIdAndUserId(fileId, currentUser.getId())
+                .orElseThrow(() -> {
+                    log.error("Document not found | user: {} | pdfFile: {}", currentUser.getUsername(), fileId);
+                    return new EntityNotFoundException("Document not found | user: " + currentUser.getUsername());
+                });
+
+        ProcessingJob processingJob = processingJobService.create(
+                ProcessingJobAction.FILE_SUMMARIZE,
+                currentUser,
+                pdfFile,
+                ZonedDateTime.now());
+
+        try {
+            String fileText = extractDocumentText(s3Service.downloadDocument(pdfFile.getS3Key()));
+
+            String summarizedText = aiService.summarize(fileText, summarizeDTO.getPrompt());
+
+            processingJobService.maskAsDone(processingJob, pdfFile.getS3Key(), summarizedText);
+            log.info("Document summarized successfully | user_id: {} | file_id: {}", currentUser.getId(), pdfFile.getId());
+            auditLogService.log(currentUser, pdfFile, processingJob, AuditLogAction.FILE_SUMMARIZE, "PDF File successfully summarized", AuditLogStatus.COMPLETED);
+
+            return PDFFileSummarizeResponseDTO.builder()
+                    .fileId(pdfFile.getId())
+                    .response(summarizedText)
+                    .build();
+
+        } catch (Exception e) {
+            processingJobService.markAsFailed(processingJob, e.getMessage());
+            log.error("Failed summarize from pdfFile | user_id: {} | file_id: {} | error: {}",
+                    currentUser.getId(), pdfFile.getId(), e.getMessage());
+            auditLogService.log(currentUser, pdfFile, processingJob, AuditLogAction.FILE_SUMMARIZE, e.getMessage(), AuditLogStatus.FAILED);
+            throw new RuntimeException("Failed to summarize pdfFile", e);
         }
     }
 
