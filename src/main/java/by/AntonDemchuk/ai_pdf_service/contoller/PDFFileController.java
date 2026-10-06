@@ -64,7 +64,7 @@ public class PDFFileController {
     }
 
     @RequestMapping(value="/{fileId}/decrypt", method=RequestMethod.PUT)
-    @Operation(summary = "Encrypt file", description = "Sets permission")
+    @Operation(summary = "Decrypt file", description = "Clears permission")
     public ResponseEntity<PDFFileDetailedReadDTO> decrypt(@PathVariable Long fileId,@RequestBody @Valid PDFDecryptionDTO dto) {
         return ResponseEntity.ok(pdfFileService.decrypt(fileId, dto.getOwnerPass()));
     }
@@ -73,5 +73,17 @@ public class PDFFileController {
     @Operation(summary = "Summarize text", description = "Summarize text from the file")
     public ResponseEntity<PDFFileSummarizeResponseDTO> summarize(@PathVariable Long fileId, @RequestBody PDFFileSummarizeDTO summarizeDTO) {
         return ResponseEntity.ok(pdfFileService.summarize(fileId, summarizeDTO));
+    }
+
+    @RequestMapping(value="/{fileId}/metadata", method=RequestMethod.GET)
+    @Operation(summary = "Get PDF file Metadata by ID", description = "Returns metadata from a PDF file identified by its ID.")
+    public ResponseEntity<PDFFileMetadataReadDTO> retrieveMetadata(@PathVariable Long fileId) {
+        return ResponseEntity.ok(pdfFileService.retrieveMetadata(fileId));
+    }
+
+    @RequestMapping(value="/{fileId}/metadata", method=RequestMethod.PUT )
+    @Operation(summary = "Update metadata", description = "Update metadata of the file")
+    public ResponseEntity<PDFFileMetadataReadDTO> updateMetadata(@PathVariable Long fileId, @RequestBody PDFFileMetadataDTO pdfFileMetadataDTO) {
+        return ResponseEntity.ok(pdfFileService.updateMetadata(fileId, pdfFileMetadataDTO));
     }
 }

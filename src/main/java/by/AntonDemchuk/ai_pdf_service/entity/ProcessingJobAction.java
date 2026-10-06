@@ -5,4 +5,5 @@ public enum ProcessingJobAction {
     FILE_SUMMARIZE,
     FILE_ENCRYPTION,
     FILE_DECRYPTION,
+    FILE_UPDATE_METADATA,
 }
