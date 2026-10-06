@@ -81,7 +81,7 @@ public class PDFFileService {
         return pdfDocumentMapper.toDto(fileToCreate);
     }
 
-    public PDFFileDetailedReadDTO redactContent(@NotNull Long fileId, PDFFileRedactDTO PDFFileRedactDto) {
+    public PDFFileDetailedReadDTO redact(@NotNull Long fileId, PDFFileRedactDTO PDFFileRedactDto) {
 
         User currentUser = sharedService.getCurrentUser();
 
@@ -92,7 +92,7 @@ public class PDFFileService {
                 });
 
         ProcessingJob processingJob = processingJobService.create(
-                ProcessingJobAction.FILE_REDACT,
+                ProcessingJobAction.FILE_REDACTION,
                 currentUser,
                 pdfFile,
                 ZonedDateTime.now());
@@ -191,6 +191,57 @@ public class PDFFileService {
         }
     }
 
+    public PDFFileDetailedReadDTO decrypt(@NotNull Long fileId, String currentOwnerPass) {
+
+        User currentUser = sharedService.getCurrentUser();
+
+        PDFFile pdfFile = pdfFileRepository.findByIdAndUserId(fileId, currentUser.getId())
+                .orElseThrow(() -> {
+                    log.error("Document not found | user: {} | pdfFile: {}", currentUser.getUsername(), fileId);
+                    return new EntityNotFoundException("Document not found | user: " + currentUser.getUsername());
+                });
+
+        ProcessingJob processingJob = processingJobService.create(
+                ProcessingJobAction.FILE_DECRYPTION,
+                currentUser,
+                pdfFile,
+                ZonedDateTime.now());
+
+        try {
+            byte[] fileBytes = s3Service.downloadDocument(pdfFile.getS3Key());
+
+            String key = s3Service.uploadDocument(
+                    decryptFile(fileBytes, currentOwnerPass),
+                    pdfFile.getName(),
+                    currentUser,
+                    "processed");
+
+            PDFFile reEncryptedFile = pdfFileRepository.save(PDFFile.builder()
+                    .name(pdfFile.getName())
+                    .originalS3Key(pdfFile.getOriginalS3Key())
+                    .s3Key(key)
+                    .parentFile(pdfFile)
+                    .version(pdfFile.getVersion() + 1L)
+                    .user(currentUser)
+                    .encryptionSettings(new PDFEncryptionSettings())
+                    .build());
+
+            processingJobService.maskAsDone(processingJob, key, new PDFEncryptionSettings().toString());
+
+            log.info("Document decrypted successfully | user_id: {} | file_id: {}", currentUser.getId(), pdfFile.getId());
+            auditLogService.log(currentUser, reEncryptedFile, processingJob, AuditLogAction.FILE_DECRYPT, "PDF File successfully decrypted", AuditLogStatus.COMPLETED);
+
+            return findPDFDocumentById(reEncryptedFile.getId());
+
+        } catch (Exception e) {
+            processingJobService.markAsFailed(processingJob, e.getMessage());
+            log.error("Failed to decrypt pdfFile | user_id: {} | file_id: {} | error: {}",
+                    currentUser.getId(), pdfFile.getId(), e.getMessage());
+            auditLogService.log(currentUser, pdfFile, processingJob, AuditLogAction.FILE_DECRYPT, e.getMessage(), AuditLogStatus.FAILED);
+            throw new RuntimeException("Failed to decrypt pdfFile", e);
+        }
+    }
+
     public PDFFileSummarizeResponseDTO summarize(@NotNull Long fileId, PDFFileSummarizeDTO summarizeDTO) {
 
         User currentUser = sharedService.getCurrentUser();
@@ -267,7 +318,6 @@ public class PDFFileService {
 
         return pdfDocumentReadMapper.toPageDto(pdfFilePage);
     }
-
 
     public void deletePDFDocument(@NotNull Long fileId) throws IOException {
 
@@ -384,6 +434,29 @@ public class PDFFileService {
         } catch (IOException e) {
             log.error("Failed to set permissions in PDF", e);
             throw new RuntimeException("Failed to set permissions in PDF", e);
+        }
+    }
+
+    private byte[] decryptFile(byte[] fileBytes, String ownerPass) {
+        try {
+            ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+
+            ReaderProperties readerProperties = new ReaderProperties()
+                    .setPassword(ownerPass.getBytes());
+
+            PdfReader reader = new PdfReader(new ByteArrayInputStream(fileBytes), readerProperties);
+
+            WriterProperties writerProperties = new WriterProperties();
+            PdfWriter writer = new PdfWriter(outputStream, writerProperties);
+
+            PdfDocument pdfDocument = new PdfDocument(reader, writer);
+            pdfDocument.close();
+
+            return outputStream.toByteArray();
+
+        } catch (Exception e) {
+            log.error("Failed to decrypt PDF", e);
+            throw new RuntimeException("Failed to decrypt PDF", e);
         }
     }
 

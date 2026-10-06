@@ -5,11 +5,11 @@ import by.AntonDemchuk.ai_pdf_service.dto.pdfFile.*;
 import by.AntonDemchuk.ai_pdf_service.service.PDFFileService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -54,7 +54,7 @@ public class PDFFileController {
     @RequestMapping(value="/{fileId}/redact", method=RequestMethod.PUT)
     @Operation(summary = "Redact sensitive information", description = "Analyzes the PDF file and hides sensitive information specified by the processing job.")
     public ResponseEntity<PDFFileDetailedReadDTO> redact(@PathVariable Long fileId, @RequestBody PDFFileRedactDTO PDFFileRedactDTO) {
-        return ResponseEntity.ok(pdfFileService.redactContent(fileId, PDFFileRedactDTO));
+        return ResponseEntity.ok(pdfFileService.redact(fileId, PDFFileRedactDTO));
     }
 
     @RequestMapping(value="/{fileId}/encrypt", method=RequestMethod.PUT)
@@ -63,9 +63,15 @@ public class PDFFileController {
         return ResponseEntity.ok(pdfFileService.encrypt(fileId, encryptionSettingsDTO));
     }
 
+    @RequestMapping(value="/{fileId}/decrypt", method=RequestMethod.PUT)
+    @Operation(summary = "Encrypt file", description = "Sets permission")
+    public ResponseEntity<PDFFileDetailedReadDTO> decrypt(@PathVariable Long fileId,@RequestBody @Valid PDFDecryptionDTO dto) {
+        return ResponseEntity.ok(pdfFileService.decrypt(fileId, dto.getOwnerPass()));
+    }
+
     @RequestMapping(value="/{fileId}/summarize", method=RequestMethod.PUT )
     @Operation(summary = "Summarize text", description = "Summarize text from the file")
-    public ResponseEntity<PDFFileSummarizeResponseDTO> setSummarizeDTO(@PathVariable Long fileId, @RequestBody PDFFileSummarizeDTO summarizeDTO) {
+    public ResponseEntity<PDFFileSummarizeResponseDTO> summarize(@PathVariable Long fileId, @RequestBody PDFFileSummarizeDTO summarizeDTO) {
         return ResponseEntity.ok(pdfFileService.summarize(fileId, summarizeDTO));
     }
 }
