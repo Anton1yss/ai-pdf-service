@@ -33,8 +33,10 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.List;
 import java.util.regex.Pattern;
 
@@ -281,6 +283,59 @@ public class PDFFileService {
         }
     }
 
+    public PDFFileMetadataReadDTO updateMetadata(@NotNull Long fileId, PDFFileMetadataDTO pdfFileMetadataDTO) {
+
+        User currentUser = sharedService.getCurrentUser();
+
+        PDFFile pdfFile = pdfFileRepository.findByIdAndUserId(fileId, currentUser.getId())
+                .orElseThrow(() -> {
+                    log.error("Document not found | user: {} | pdfFile: {}", currentUser.getUsername(), fileId);
+                    return new EntityNotFoundException("Document not found | user: " + currentUser.getUsername());
+                });
+
+        ProcessingJob processingJob = processingJobService.create(
+                ProcessingJobAction.FILE_UPDATE_METADATA,
+                currentUser,
+                pdfFile,
+                ZonedDateTime.now());
+
+        PDFFile file = null;
+
+        try {
+            byte[] fileToChange = s3Service.downloadDocument(pdfFile.getS3Key());
+
+            String key = s3Service.uploadDocument(
+                    changeFileMetadata(fileToChange, pdfFileMetadataDTO),
+                    pdfFile.getName(),
+                    currentUser,
+                    "processed");
+
+            file = pdfFileRepository.save(PDFFile.builder()
+                    .name(pdfFile.getName())
+                    .originalS3Key(pdfFile.getOriginalS3Key())
+                    .s3Key(key)
+                    .parentFile(pdfFile)
+                    .version(pdfFile.getVersion() + 1L)
+                    .user(currentUser)
+                    .encryptionSettings(pdfFile.getEncryptionSettings())
+                    .build());
+
+            processingJobService.maskAsDone(processingJob, key, "Metadata updated successfully: " + pdfFileMetadataDTO.toString());
+
+            log.info("Metadata updated successfully | user_id: {} | file_id: {}", currentUser.getId(), pdfFile.getId());
+            auditLogService.log(currentUser, file, processingJob, AuditLogAction.FILE_UPDATE_METADATA, "Metadata updated", AuditLogStatus.COMPLETED);
+
+            return retrieveMetadata(file.getId());
+
+        } catch (Exception e) {
+            processingJobService.markAsFailed(processingJob, e.getMessage());
+            log.error("Failed to update metadata for pdfFile | user_id: {} | file_id: {} | error: {}",
+                    currentUser.getId(), pdfFile.getId(), e.getMessage());
+            auditLogService.log(currentUser, pdfFile, processingJob, AuditLogAction.FILE_UPDATE_METADATA, e.getMessage(), AuditLogStatus.FAILED);
+            throw new RuntimeException("Failed to update metadata for pdfFile", e);
+        }
+    }
+
     @Transactional(readOnly = true)
     public PDFFileDetailedReadDTO findPDFDocumentById(@NotNull Long fileId) {
 
@@ -319,6 +374,23 @@ public class PDFFileService {
         return pdfDocumentReadMapper.toPageDto(pdfFilePage);
     }
 
+    @Transactional(readOnly = true)
+    public PDFFileMetadataReadDTO retrieveMetadata(@NotNull Long fileId) {
+
+        User currentUser = sharedService.getCurrentUser();
+
+        PDFFile pdfFile = pdfFileRepository.findByIdAndUserId(fileId, currentUser.getId())
+                .orElseThrow(() -> new EntityNotFoundException("Document with id " + fileId + " not found"));
+
+        byte[] pdfBytes = s3Service.downloadDocument(pdfFile.getS3Key());
+
+        PDFFileMetadataReadDTO fileMetadata = getMetadata(pdfBytes);
+
+        log.info("Metadata retrieved successfully | user_id: {} | file_id: {}", currentUser.getId(), pdfFile.getId());
+
+        return fileMetadata;
+    }
+
     public void deletePDFDocument(@NotNull Long fileId) throws IOException {
 
         PDFFile document = pdfFileRepository.findById(fileId)
@@ -353,6 +425,53 @@ public class PDFFileService {
             log.error("Failed to extract text from PDF");
             throw new RuntimeException("Failed to extract text from PDF", e);
         }
+    }
+
+    private PDFFileMetadataReadDTO getMetadata(byte[] fileBytes) {
+        try (PdfDocument pdfDocument = new PdfDocument(
+                new PdfReader(new ByteArrayInputStream(fileBytes))
+        )) {
+            PdfDocumentInfo info = pdfDocument.getDocumentInfo();
+
+            return PDFFileMetadataReadDTO.builder()
+                    .title(info.getTitle())
+                    .author(info.getAuthor())
+                    .subject(info.getSubject())
+                    .keywords(info.getKeywords())
+                    .creator(info.getCreator())
+                    .producer(info.getProducer())
+                    .creationDate(parsePdfDate(info.getMoreInfo("CreationDate")))
+                    .modificationDate(parsePdfDate(info.getMoreInfo("ModDate")))
+                    .pdfVersion(pdfDocument.getPdfVersion().toString())
+                    .pageCount(pdfDocument.getNumberOfPages())
+                    .build();
+
+        } catch (IOException e) {
+            log.error("Failed to extract metadata from PDF", e);
+            throw new RuntimeException("Failed to extract metadata from PDF", e);
+        }
+    }
+
+    private byte[] changeFileMetadata(byte[] fileBytes, PDFFileMetadataDTO metadata) {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+
+        try (PdfDocument pdfDocument = new PdfDocument(
+                new PdfReader(new ByteArrayInputStream(fileBytes)),
+                new PdfWriter(out)
+        )) {
+            PdfDocumentInfo info = pdfDocument.getDocumentInfo();
+
+            if (metadata.getTitle() != null) info.setTitle(metadata.getTitle());
+            if (metadata.getAuthor() != null) info.setAuthor(metadata.getAuthor());
+            if (metadata.getSubject() != null) info.setSubject(metadata.getSubject());
+            if (metadata.getKeywords() != null) info.setKeywords(metadata.getKeywords());
+
+        } catch (IOException e) {
+            log.error("Failed to update metadata of PDF", e);
+            throw new RuntimeException("Failed to update metadata of PDF", e);
+        }
+
+        return out.toByteArray();
     }
 
     private byte[] redactPhrases(byte[] fileBytes, List<String> phrasesToRedact) {
@@ -488,5 +607,14 @@ public class PDFFileService {
         if (name == null || !name.toLowerCase().endsWith(".pdf")) {
             throw new IllegalArgumentException("Invalid file extension");
         }
+    }
+
+    private ZonedDateTime parsePdfDate(String raw) {
+        if (raw == null || raw.isBlank()) return null;
+        Calendar cal = PdfDate.decode(raw);
+        if (cal == null) return null;
+
+        int offsetSeconds = cal.getTimeZone().getOffset(cal.getTimeInMillis()) / 1000;
+        return ZonedDateTime.ofInstant(cal.toInstant(), ZoneOffset.ofTotalSeconds(offsetSeconds));
     }
 }
