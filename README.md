@@ -1,7 +1,9 @@
 # AI PDF Service
 
-A **PDF processing backend** built with Java and Spring Boot. Users authenticate with JWT, upload PDFs to Amazon S3, and run AI-assisted and iText-powered operations on their files – redaction, encryption, and summarization – with every action tracked as a processing job and logged in an audit trail.
+A **PDF processing backend** built with Java and Spring Boot. Users authenticate with JWT, upload PDFs to Amazon S3, and run AI-assisted and iText-powered operations on their files – redaction, encryption, summarization, and metadata editing – with every action tracked as a processing job and logged in an audit trail.
 
+---
+![swagger-ui.png](assets/SwaggerDocumentationUI.png)
 ---
 
 ### Table of Contents
@@ -10,8 +12,10 @@ A **PDF processing backend** built with Java and Spring Boot. Users authenticate
 - [Tech Stack](#tech-stack)
 - [Features](#features)
 - [Installation](#installation)
+- [Configuration](#configuration)
 - [Testing](#testing)
 - [Project Structure](#project-structure)
+- [Design Notes](#design-notes)
 
 ---
 
@@ -23,7 +27,8 @@ AI PDF Service is a REST API for managing and processing PDF documents:
 - **PDF Management** – upload, list, fetch, and delete PDF files; files are stored in S3, with metadata kept in PostgreSQL.
 - **AI-Assisted Processing** – natural-language prompts are sent to OpenAI (GPT-4o mini) to detect phrases to redact or to generate a document summary, which iText then applies to the PDF.
 - **Encryption** – AES-256 encryption with configurable owner/user permissions (printing, copying, modification, etc.) via iText.
-- **Jobs & Audit** – every processing action (redact, summarize, encrypt, decrypt) creates a `ProcessingJob` record, and every request is written to a user-scoped, filterable, paginated `AuditLog`.
+- **Metadata** – read and update document properties (title, author, subject, keywords) without touching the content.
+- **Jobs & Audit** – every processing action (redact, summarize, encrypt, decrypt, metadata update) creates a `ProcessingJob` record, and every request is written to a user-scoped, filterable, paginated `AuditLog`.
 - **Docs** – interactive API documentation via Swagger UI.
 
 ### PDF File Operations
@@ -33,13 +38,29 @@ Each PDF goes through the same lifecycle: **upload → (optionally) process → 
 | Operation | What happens |
 |---|---|
 | **Upload** | `POST /pdfFile` accepts a multipart file. It's validated before storage: must be `.pdf` / `application/pdf`, non-empty, and ≤ 10 MB. The file is pushed to S3 under an `originals/` key and a `PDFFile` record (version `1`) is created. |
-| **List / Fetch** | `GET /pdfFile/my` returns a paginated list of the current user's files. `GET /pdfFile/{fileId}` returns full details, including a **pre-signed S3 URL** to download that specific version. |
+| **List / Fetch** | `GET /pdfFile/my` returns a paginated list of the current user's files. `GET /pdfFile/{fileId}` returns full details, including the PDF metadata and a **pre-signed S3 URL** to download that specific version. |
 | **AI Redaction** | `PUT /pdfFile/{fileId}/redact` takes a plain-language `prompt` (e.g. *"hide names and phone numbers"*). The text is extracted from the PDF, sent to OpenAI which returns the exact phrases to redact, and iText then locates every occurrence of each phrase on every page and permanently blacks it out (via `PdfCleanUpTool`, not just visual overlay). |
 | **Encryption** | `PUT /pdfFile/{fileId}/encrypt` applies **AES-256** standard encryption with separate user/owner passwords, plus granular permission flags: printing, copying, content/annotation modification, form fill-in, screen-reader access, and document assembly. |
 | **Summarization** | `PUT /pdfFile/{fileId}/summarize` extracts the PDF's text and asks OpenAI for a summary shaped by the given `prompt` (detail level, focus, etc.). Unlike redact/encrypt, this doesn't alter the file – it just returns the summary text. |
+| **Metadata update** | `PUT /pdfFile/{fileId}/metadata` updates `title`, `author`, `subject` and `keywords`. Fields that are omitted (`null`) are left unchanged, so partial updates work. The modification date is refreshed, the creation date is preserved, and the result is saved as a new version. |
 | **Delete** | `DELETE /pdfFile/{fileId}` removes the file from both S3 and the database. |
 
-**Versioning:** redaction and encryption never overwrite a file in place – each run creates a *new* `PDFFile` row (`version = parent.version + 1`, linked via `parentFile`) pointing at a new S3 object, while the original stays intact. This means you always have a full, retrievable history of every transformation applied to a document.
+**Versioning:** redaction, encryption and metadata updates never overwrite a file in place – each run creates a *new* `PDFFile` row (`version = parent.version + 1`, linked via `parentFile`) pointing at a new S3 object, while the original stays intact. This means you always have a full, retrievable history of every transformation applied to a document.
+
+### Reading metadata
+
+File details expose the following PDF properties: title, author, subject, keywords, creator, producer, creation date, modification date, PDF version and page count. Dates are parsed from PDF date strings (`D:YYYYMMDDHHmmSS+HH'mm'`) into `ZonedDateTime`; missing or malformed dates are returned as `null` instead of failing the request.
+
+Example update body:
+
+```json
+{
+  "title": "Quarterly report",
+  "author": "Jane Doe",
+  "subject": "Q3 2026",
+  "keywords": "finance, report"
+}
+```
 
 ## Tech Stack
 
@@ -47,12 +68,13 @@ Each PDF goes through the same lifecycle: **upload → (optionally) process → 
 |---|---|
 | Language / Runtime | Java 21 |
 | Framework | Spring Boot 3.4 (Web, Security, Validation, Data JPA) |
-| Database | PostgreSQL |
+| Database | PostgreSQL 17 |
 | Auth | JWT (`jjwt`) |
 | Storage | Amazon S3 (AWS SDK v2) |
 | AI | OpenAI Java SDK (GPT-4o mini) |
 | PDF Processing | iText 8 (core, cleanup, bouncy-castle-adapter) |
 | Mapping | MapStruct, Lombok |
+| Logging | Log4j2 |
 | Docs | springdoc-openapi / Swagger UI |
 | Build / Deploy | Gradle, Docker, Docker Compose |
 | Testing | JUnit 5 |
@@ -64,7 +86,9 @@ Each PDF goes through the same lifecycle: **upload → (optionally) process → 
 - **Redaction:** describe in plain English what to redact – the AI service extracts the exact phrases and iText hides them in the document.
 - **Summarization:** ask for a summary with an optional focus/detail level; the AI service returns structured plain text.
 - **Encryption:** apply AES-256 encryption with fine-grained owner/user permissions.
-- **Processing jobs:** every redact/summarize/encrypt/decrypt action is recorded with its status, and can be looked up by job ID or by file.
+- **Metadata:** read and partially update title, author, subject and keywords.
+- **Versioning:** every transformation creates a new linked version; nothing is overwritten.
+- **Processing jobs:** every redact/summarize/encrypt/decrypt/metadata action is recorded with its status, and can be looked up by job ID or by file.
 - **Audit log:** every request is logged per user, with admin-only endpoints to search across all users, by user, or by file.
 - **Admin panel (API):** list/inspect users and their files, and browse the full audit log.
 
@@ -82,13 +106,11 @@ git clone https://github.com/anton1yss/ai-pdf-service.git
 cd ai-pdf-service
 ```
 
-3️⃣ Create a `.env` file from the example and fill in real values:
+3️⃣ Create a `.env` file from the example and fill in real values (see [Configuration](#configuration)):
 
 ```bash
 cp .env.example .env
 ```
-
-For Docker Compose, `POSTGRES_HOST` must be the database service name (`db`). The app connects to PostgreSQL on port **5432** inside the network. `JWT_SECRET` must be a **Base64-encoded** key (at least 256 bits for HS256). `JWT_EXPIRATION` is in milliseconds (for example `86400000` for 24 hours). You also need a valid AWS S3 bucket and an OpenAI API key.
 
 4️⃣ Start the application:
 
@@ -104,7 +126,25 @@ docker compose down
 
 The API is served at **http://localhost:8080/api/v1**. PostgreSQL is published on **localhost:5555** if you need a local SQL client.
 
-> Prefer running without Docker? Use `./gradlew bootRun` after exporting the same variables (or keeping the `.env` file – it's auto-loaded via `spring.config.import`) and pointing `POSTGRES_HOST` at a reachable Postgres instance.
+> Prefer running without Docker? Use `./gradlew bootRun` after exporting the same variables (or keeping the `.env` file – it's auto-loaded via `spring.config.import`) and pointing `POSTGRES_HOST` at a reachable Postgres instance. Java 21 is required.
+
+## Configuration
+
+| Variable | Description |
+|---|---|
+| `POSTGRES_HOST` | Database host. Use the service name `db` with Docker Compose, `localhost` otherwise. |
+| `POSTGRES_DB` | Database name. |
+| `POSTGRES_USER` | Database user. |
+| `POSTGRES_PASSWORD` | Database password. |
+| `AWS_ACCESS_KEY` | AWS access key. |
+| `AWS_SECRET_KEY` | AWS secret key. |
+| `AWS_S3_BUCKET_NAME` | S3 bucket that stores the PDFs. |
+| `AWS_REGION` | Region of the bucket, e.g. `eu-central-1`. |
+| `JWT_SECRET` | **Base64-encoded** signing key, at least 256 bits for HS256. |
+| `JWT_EXPIRATION` | Token lifetime in **milliseconds**, e.g. `86400000` for 24 hours. |
+| `OPENAI_API_KEY` | OpenAI API key used for redaction and summarization. |
+
+Inside the Docker network the app connects to PostgreSQL on port **5432**. Never commit `.env`; use an IAM user limited to the one bucket.
 
 ## Testing
 
